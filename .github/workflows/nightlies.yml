@@ -1,80 +1,40 @@
-name: Make Nightly
-
-permissions:
-  contents: write
+name: Android Release
 
 on:
-  workflow_dispatch:
   push:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Setup JDK 17
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
-          distribution: 'adopt'
-          java-version: 17
+          distribution: 'zulu'
+          java-version: '17'
           cache: 'gradle'
 
-      - name: Make gradlew executable
+      - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Build with Gradle
-        run: ./gradlew assemblePreview
-
-      - name: Sign apk
-        uses: r0adkll/sign-android-release@v1
-        with:
-          releaseDirectory: app/build/outputs/apk/preview
-          signingKeyBase64: ${{ secrets.SIGNING_KEYSTORE }}
-          alias: ${{ secrets.SIGNING_KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: "35.0.0"
-
-      - name: Copy build artifacts
+      - name: Configure Gradle heap size
         run: |
-          set -e
+          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxPermSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8" >> gradle.properties
 
-          commit_count=$(git rev-list --count HEAD)
-          echo "COMMIT_COUNT=$commit_count" >> $GITHUB_ENV
+      - name: Run Gradle tests
+        run: ./gradlew test --no-daemon --max-workers=2 --info
 
-          declare -a apks=("universal" "arm64-v8a" "armeabi-v7a" "x86" "x86_64")
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon --max-workers=2 --info
 
-          printf "%s\n" "${apks[@]}" | xargs -n 1 -I {} sh -c '
-          cp app/build/outputs/apk/preview/app-{}-preview-signed.apk mpvKt-{}.apk'
-
-      - name: Upload the universal artifact
+      - name: Upload unsigned release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          path: ./mpvKt-universal.apk
-          name: universal-r${{ env.COMMIT_COUNT }}
-      - name: Upload the arm64-v8a artifact
-        uses: actions/upload-artifact@v4
-        with:
-          path: ./mpvKt-arm64-v8a.apk
-          name: arm64-v8a-r${{ env.COMMIT_COUNT }}
-      - name: Upload the armeabi-v7a artifact
-        uses: actions/upload-artifact@v4
-        with:
-          path: ./mpvKt-armeabi-v7a.apk
-          name: armeabi-v7a-r${{ env.COMMIT_COUNT }}
-      - name: Upload the x86 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          path: ./mpvKt-x86.apk
-          name: x86-r${{ env.COMMIT_COUNT }}
-      - name: Upload the x86_64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          path: ./mpvKt-x86_64.apk
-          name: x86_64-r${{ env.COMMIT_COUNT }}
+          name: unsigned-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
