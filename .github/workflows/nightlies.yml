@@ -1,4 +1,4 @@
-name: Android Release
+name: nightly Release
 
 on:
   push:
@@ -27,14 +27,34 @@ jobs:
         run: |
           echo "org.gradle.jvmargs=-Xmx4g -XX:MaxPermSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8" >> gradle.properties
 
+      - name: Decrypt and setup keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > signingKey.jks
+
       - name: Run Gradle tests
         run: ./gradlew test --no-daemon --max-workers=2 --info
 
       - name: Build release APK
         run: ./gradlew assembleRelease --no-daemon --max-workers=2 --info
 
-      - name: Upload unsigned release APK artifact
+      - name: Sign the APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          $ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner sign \
+            --ks signingKey.jks \
+            --ks-key-alias $KEY_ALIAS \
+            --ks-pass pass:$KEYSTORE_PASSWORD \
+            --key-pass pass:$KEY_PASSWORD \
+            --out app/build/outputs/apk/release/app-release-signed.apk \
+            app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload signed release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: unsigned-release-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          name: release-apk
+          path: app/build/outputs/apk/release/app-release-signed.apk
